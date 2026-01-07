@@ -30,13 +30,8 @@ def get_scan_stats():
     conn = sqlite3.connect(DB_FILE)
     try:
         cursor = conn.cursor()
-        
-        # 1. Last Update Time
         cursor.execute("SELECT MAX(found_at) FROM tenders")
         last_time = cursor.fetchone()[0]
-        
-        # 2. Count New Tenders (Found in last 24 hours)
-        # Assuming found_at format is YYYY-MM-DD HH:MM:SS
         cursor.execute("SELECT COUNT(*) FROM tenders WHERE found_at >= date('now', '-1 day')")
         recent_count = cursor.fetchone()[0]
 
@@ -75,16 +70,10 @@ st.markdown(f"""
     .header-logo {{ height: 100px; width: auto; margin-right: 30px; }}
     .header-title {{ font-size: 36px; font-weight: 800; color: #fff; margin: 0; }}
 
-    /* STATUS PILL (Interactive Look) */
-    .status-container {{
-        text-align: right;
-    }}
-    .status-text {{
-        color: #94a3b8; font-size: 14px; font-weight: 600; margin-bottom: 4px;
-    }}
-    .status-sub {{
-        color: #38bdf8; font-size: 12px; font-weight: 500;
-    }}
+    /* STATUS PILL */
+    .status-container {{ text-align: right; }}
+    .status-text {{ color: #94a3b8; font-size: 14px; font-weight: 600; margin-bottom: 4px; }}
+    .status-sub {{ color: #38bdf8; font-size: 12px; font-weight: 500; }}
 
     /* SPACER */
     .content-spacer {{ height: 160px; width: 100%; background: transparent; }}
@@ -151,6 +140,26 @@ st.markdown(f"""
         background-color: rgba(56, 189, 248, 0.1) !important;
     }}
 
+    /* --- FOOTER CSS --- */
+    .custom-footer {{
+        width: 100%;
+        text-align: center;
+        padding: 30px 0px;
+        margin-top: 50px;
+        border-top: 1px solid #1e293b;
+        color: #64748b;
+        font-size: 13px;
+    }}
+    .custom-footer a {{
+        color: #94a3b8;
+        text-decoration: none;
+        margin: 0 10px;
+        transition: color 0.3s;
+    }}
+    .custom-footer a:hover {{
+        color: #38bdf8;
+    }}
+
 </style>
 
 <div class="sticky-header">
@@ -168,45 +177,29 @@ st.markdown(f"""
 # --- DATA FUNCTIONS ---
 def get_data(status_filter):
     conn = sqlite3.connect(DB_FILE)
-    
-    # Get Today's Date for comparison (Format: DD-MM-YYYY based on GeM)
-    # Note: GeM dates are usually DD-MM-YYYY. SQL comparison needs YYYY-MM-DD.
-    # Because we stored them as strings "DD-MM-YYYY ...", string comparison might fail.
-    # We will fetch ALL and filter in Python for accuracy.
-    
     query = "SELECT * FROM tenders ORDER BY found_at DESC"
-    
     try:
         df = pd.read_sql(query, conn)
     except Exception:
         df = pd.DataFrame()
     conn.close()
     
-    if df.empty:
-        return df
+    if df.empty: return df
 
-    # --- DATE PARSING LOGIC ---
     def parse_date(date_str):
         try:
-            # Clean up the date string (remove times like 1:00 PM)
             clean_str = date_str.split(' ')[0] 
             return datetime.strptime(clean_str, "%d-%m-%Y")
         except:
-            return datetime.max # If parsing fails, assume future so it doesn't expire
+            return datetime.max 
 
-    # Add a real datetime column for filtering
     df['real_end_date'] = df['end_date'].apply(parse_date)
     today = datetime.now()
 
-    # --- TAB FILTERING LOGIC ---
     if status_filter == "Expired":
-        # Show ONLY Expired bids (regardless of status)
         df = df[df['real_end_date'] < today]
     else:
-        # For Live/Saved, show ONLY Active bids
         df = df[df['real_end_date'] >= today]
-        
-        # Apply Status Filter
         if status_filter == "Live":
             df = df[df['status'] == 'New']
         elif status_filter == "Bookmarked":
@@ -280,7 +273,7 @@ c1, c2, c3 = st.columns([1, 2, 1])
 with c2:
     search_query = st.text_input("Search", placeholder="🔍 Search tenders by ID, Item, or Department...", label_visibility="collapsed")
 
-# 3. TABS (Added 'Expired' Tab)
+# 3. TABS
 tab_live, tab_saved, tab_archive, tab_expired = st.tabs(["📡 Live Feed", "📌 Saved Bids", "🗄️ Archive", "⚠️ Expired"])
 
 # 4. CONTENT
@@ -309,3 +302,14 @@ with tab_live: render_tab_content("Live")
 with tab_saved: render_tab_content("Bookmarked")
 with tab_archive: render_tab_content("Ignored")
 with tab_expired: render_tab_content("Expired")
+
+# --- 5. FOOTER (INJECTED AT BOTTOM) ---
+st.markdown("""
+    <div class="custom-footer">
+        Made by <b>VORSV Inc.</b> &copy; 2026<br>
+        <br>
+        <a href="#">System Status</a> &bull; 
+        <a href="#">Logs</a> &bull; 
+        <a href="#">Documentation</a>
+    </div>
+""", unsafe_allow_html=True)
