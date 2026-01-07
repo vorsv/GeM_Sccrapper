@@ -3,9 +3,10 @@ import sqlite3
 import pandas as pd
 import os
 import base64
+from datetime import datetime
 
 # --- CONFIG ---
-st.set_page_config(page_title="GeM Tender Hub", layout="wide", page_icon="🏛️")
+st.set_page_config(page_title="DD's GeM Hub", layout="wide", page_icon="🏛️")
 DB_FILE = "tenders.db"
 LOGO_FILE = "logo.png"
 
@@ -24,43 +25,71 @@ if os.path.exists(LOGO_FILE):
 else:
     logo_html = "" 
 
+# --- HELPER: GET STATS FOR HEADER ---
+def get_scan_stats():
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        cursor = conn.cursor()
+        
+        # 1. Last Update Time
+        cursor.execute("SELECT MAX(found_at) FROM tenders")
+        last_time = cursor.fetchone()[0]
+        
+        # 2. Count New Tenders (Found in last 24 hours)
+        # Assuming found_at format is YYYY-MM-DD HH:MM:SS
+        cursor.execute("SELECT COUNT(*) FROM tenders WHERE found_at >= date('now', '-1 day')")
+        recent_count = cursor.fetchone()[0]
+
+        display_time = "N/A"
+        if last_time:
+            dt = datetime.strptime(last_time, '%Y-%m-%d %H:%M:%S')
+            display_time = dt.strftime('%d %b %H:%M')
+            
+        return display_time, recent_count
+    except:
+        return "Offline", 0
+    finally:
+        conn.close()
+
+last_time_str, recent_count = get_scan_stats()
+
 # --- UI REFINEMENTS CSS ---
 st.markdown(f"""
 <style>
-    /* 1. HIDE DEFAULT UI */
-    header[data-testid="stHeader"], footer, #MainMenu {{
-        display: none !important;
-    }}
+    header[data-testid="stHeader"], footer, #MainMenu {{ display: none !important; }}
     
-    /* 2. BACKGROUND */
-    .stApp {{
-        background-color: #0f172a;
-        color: #f8fafc;
-    }}
+    .stApp {{ background-color: #0f172a; color: #f8fafc; }}
     
-    /* 3. STICKY HEADER */
+    /* STICKY HEADER */
     .sticky-header {{
         position: fixed; top: 0; left: 0; width: 100%;
         background-color: #0f172a;
         z-index: 999999;
         padding: 10px 40px; 
         border-bottom: 1px solid #1e293b;
-        display: flex; align-items: center; 
+        display: flex; align-items: center; justify-content: space-between;
         height: 140px; 
         box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
     }}
-    
+    .header-left {{ display: flex; align-items: center; }}
     .header-logo {{ height: 100px; width: auto; margin-right: 30px; }}
     .header-title {{ font-size: 36px; font-weight: 800; color: #fff; margin: 0; }}
 
-    /* 4. SPACER CLASS (The Fix) */
-    .content-spacer {{
-        height: 160px; /* Forces content down */
-        width: 100%;
-        background: transparent;
+    /* STATUS PILL (Interactive Look) */
+    .status-container {{
+        text-align: right;
+    }}
+    .status-text {{
+        color: #94a3b8; font-size: 14px; font-weight: 600; margin-bottom: 4px;
+    }}
+    .status-sub {{
+        color: #38bdf8; font-size: 12px; font-weight: 500;
     }}
 
-    /* 5. SEARCH BAR */
+    /* SPACER */
+    .content-spacer {{ height: 160px; width: 100%; background: transparent; }}
+
+    /* SEARCH BAR */
     div[data-testid="stTextInput"] input {{
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
@@ -74,7 +103,7 @@ st.markdown(f"""
         box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
     }}
 
-    /* 6. CLEAN TABS */
+    /* TABS */
     div[data-baseweb="tab-list"] {{
         background-color: transparent !important;
         border: none !important;
@@ -87,17 +116,14 @@ st.markdown(f"""
         background-color: transparent !important;
         border: none !important;
         color: #94a3b8 !important; 
-        font-size: 18px !important; 
-        font-weight: 600 !important;
+        font-size: 18px !important; font-weight: 600 !important;
         padding-bottom: 12px !important;
     }}
     button[data-baseweb="tab"][aria-selected="true"] {{
-        color: #38bdf8 !important; 
-        border-bottom: 3px solid #38bdf8 !important;
+        color: #38bdf8 !important; border-bottom: 3px solid #38bdf8 !important;
     }}
-    button[data-baseweb="tab"]:focus {{ outline: none !important; }}
 
-    /* 7. CARD STYLING */
+    /* CARD STYLING */
     div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {{
         background-color: #1e293b;
         border: 1px solid #334155;
@@ -105,14 +131,14 @@ st.markdown(f"""
         padding: 20px;
     }}
     
-    /* 8. TYPOGRAPHY & BADGES */
     .item-title {{ font-size: 18px; font-weight: 700; color: #f8fafc; margin-bottom: 5px; }}
     .dept-subtitle {{ font-size: 14px; color: #94a3b8; font-weight: 500; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 10px; }}
     .badge {{ display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-right: 8px; }}
     .badge-blue {{ background-color: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid #0ea5e9; }} 
     .badge-purple {{ background-color: rgba(192, 132, 252, 0.1); color: #e879f9; border: 1px solid #d946ef; }}
+    .badge-red {{ background-color: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid #ef4444; }}
     
-    /* 9. BUTTONS */
+    /* BUTTONS */
     div.stButton > button {{
         background-color: transparent !important;
         color: #cbd5e1 !important;
@@ -128,25 +154,66 @@ st.markdown(f"""
 </style>
 
 <div class="sticky-header">
-    <img src="{logo_html}" class="header-logo">
-    <h1 class="header-title">GeM Tender Hub</h1>
+    <div class="header-left">
+        <img src="{logo_html}" class="header-logo">
+        <h1 class="header-title">DD's GeM Hub</h1>
+    </div>
+    <div class="status-container">
+        <div class="status-text">Last Scan: {last_time_str}</div>
+        <div class="status-sub">⚡ {recent_count} added recently</div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
 # --- DATA FUNCTIONS ---
 def get_data(status_filter):
     conn = sqlite3.connect(DB_FILE)
-    if status_filter == "All":
-        query = "SELECT * FROM tenders ORDER BY found_at DESC"
-    elif status_filter == "Live":
-        query = "SELECT * FROM tenders WHERE status = 'New' ORDER BY found_at DESC"
-    else:
-        query = f"SELECT * FROM tenders WHERE status = '{status_filter}' ORDER BY found_at DESC"
+    
+    # Get Today's Date for comparison (Format: DD-MM-YYYY based on GeM)
+    # Note: GeM dates are usually DD-MM-YYYY. SQL comparison needs YYYY-MM-DD.
+    # Because we stored them as strings "DD-MM-YYYY ...", string comparison might fail.
+    # We will fetch ALL and filter in Python for accuracy.
+    
+    query = "SELECT * FROM tenders ORDER BY found_at DESC"
+    
     try:
         df = pd.read_sql(query, conn)
     except Exception:
         df = pd.DataFrame()
     conn.close()
+    
+    if df.empty:
+        return df
+
+    # --- DATE PARSING LOGIC ---
+    def parse_date(date_str):
+        try:
+            # Clean up the date string (remove times like 1:00 PM)
+            clean_str = date_str.split(' ')[0] 
+            return datetime.strptime(clean_str, "%d-%m-%Y")
+        except:
+            return datetime.max # If parsing fails, assume future so it doesn't expire
+
+    # Add a real datetime column for filtering
+    df['real_end_date'] = df['end_date'].apply(parse_date)
+    today = datetime.now()
+
+    # --- TAB FILTERING LOGIC ---
+    if status_filter == "Expired":
+        # Show ONLY Expired bids (regardless of status)
+        df = df[df['real_end_date'] < today]
+    else:
+        # For Live/Saved, show ONLY Active bids
+        df = df[df['real_end_date'] >= today]
+        
+        # Apply Status Filter
+        if status_filter == "Live":
+            df = df[df['status'] == 'New']
+        elif status_filter == "Bookmarked":
+            df = df[df['status'] == 'Bookmarked']
+        elif status_filter == "Ignored":
+            df = df[df['status'] == 'Ignored']
+            
     return df
 
 def update_status(bid_no, new_status):
@@ -160,14 +227,19 @@ def update_status(bid_no, new_status):
 # --- CARD RENDERER ---
 def render_single_card(row, status_mode):
     ukey = f"{row['bid_no']}_{status_mode}"
+    is_expired = status_mode == "Expired"
+    
     with st.container(border=True):
         st.markdown(f"<div class='item-title'>{row['items']}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='dept-subtitle'>🏢 {row['department']}</div>", unsafe_allow_html=True)
         
-        st.markdown(f"""
-            <span class="badge badge-blue">🎯 {row['title']}</span>
-            <span class="badge badge-purple">🆔 {row['bid_no']}</span>
-        """, unsafe_allow_html=True)
+        if is_expired:
+             st.markdown(f"""<span class="badge badge-red">⚠️ EXPIRED</span>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+                <span class="badge badge-blue">🎯 {row['title']}</span>
+                <span class="badge badge-purple">🆔 {row['bid_no']}</span>
+            """, unsafe_allow_html=True)
         
         st.write("") 
         
@@ -175,7 +247,8 @@ def render_single_card(row, status_mode):
         with c1:
             st.markdown(f"<div style='color:#94a3b8;font-size:11px;font-weight:700;'>🚀 START</div><div style='color:#f1f5f9;font-weight:600;'>{row['start_date']}</div>", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"<div style='color:#94a3b8;font-size:11px;font-weight:700;'>⏳ END</div><div style='color:#f1f5f9;font-weight:600;'>{row['end_date']}</div>", unsafe_allow_html=True)
+            color = "#f87171" if is_expired else "#f1f5f9"
+            st.markdown(f"<div style='color:#94a3b8;font-size:11px;font-weight:700;'>⏳ END</div><div style='color:{color};font-weight:600;'>{row['end_date']}</div>", unsafe_allow_html=True)
             
         st.divider()
         
@@ -183,31 +256,34 @@ def render_single_card(row, status_mode):
         with cols[0]:
             st.link_button("📄 PDF", row['link'], use_container_width=True)
         with cols[1]:
-            if status_mode != "Bookmarked":
-                if st.button("📌 Save", key=f"bm_{ukey}", use_container_width=True): 
-                    update_status(row['bid_no'], "Bookmarked")
+            if not is_expired:
+                if status_mode != "Bookmarked":
+                    if st.button("📌 Save", key=f"bm_{ukey}", use_container_width=True): 
+                        update_status(row['bid_no'], "Bookmarked")
+                else:
+                    if st.button("📤 Unsave", key=f"un_{ukey}", use_container_width=True): 
+                        update_status(row['bid_no'], "New")
             else:
-                if st.button("📤 Unsave", key=f"un_{ukey}", use_container_width=True): 
-                    update_status(row['bid_no'], "New")
+                 st.button("🚫 Ended", key=f"end_{ukey}", disabled=True, use_container_width=True)
+
         with cols[2]:
              if st.button("🗑️ Ignore", key=f"ig_{ukey}", use_container_width=True): 
                  update_status(row['bid_no'], "Ignored")
 
 # --- UI LOGIC ---
 
-# 1. THE BRUTE-FORCE SPACER (The Critical Fix)
-# This invisible box forces the stream down by 160px
+# 1. SPACER
 st.markdown('<div class="content-spacer"></div>', unsafe_allow_html=True)
 
-# 2. CENTRAL SEARCH BAR
+# 2. SEARCH
 c1, c2, c3 = st.columns([1, 2, 1])
 with c2:
     search_query = st.text_input("Search", placeholder="🔍 Search tenders by ID, Item, or Department...", label_visibility="collapsed")
 
-# 3. TABS
-tab_live, tab_saved, tab_archive = st.tabs(["📡 Live Feed", "📌 Saved Bids", "🗄️ Archive"])
+# 3. TABS (Added 'Expired' Tab)
+tab_live, tab_saved, tab_archive, tab_expired = st.tabs(["📡 Live Feed", "📌 Saved Bids", "🗄️ Archive", "⚠️ Expired"])
 
-# 4. GRID CONTENT
+# 4. CONTENT
 def render_tab_content(status_mode):
     df = get_data(status_mode)
     if search_query:
@@ -216,7 +292,7 @@ def render_tab_content(status_mode):
                 df['title'].str.contains(search_query, case=False, na=False)]
     
     if df.empty:
-        st.info("No tenders found.")
+        st.info("No tenders found here.")
         return
     
     st.caption(f"Showing {len(df)} tenders")
@@ -232,3 +308,4 @@ def render_tab_content(status_mode):
 with tab_live: render_tab_content("Live")
 with tab_saved: render_tab_content("Bookmarked")
 with tab_archive: render_tab_content("Ignored")
+with tab_expired: render_tab_content("Expired")
