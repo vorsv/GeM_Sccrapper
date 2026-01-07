@@ -1,230 +1,288 @@
-import json
-import time
-import os
-import requests
+import streamlit as st
 import sqlite3
-from datetime import datetime
-from playwright.sync_api import sync_playwright
-import schedule
-import config  # Importing your config.py
+import pandas as pd
+import os
+import base64
 
-# --- DATABASE FUNCTIONS ---
-def bid_exists(bid_no):
-    """Checks if the bid is already in the database to avoid duplicate alerts."""
-    conn = sqlite3.connect("tenders.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM tenders WHERE bid_no = ?", (bid_no,))
-    exists = cursor.fetchone() is not None
+# --- CONFIG ---
+st.set_page_config(page_title="GeM Tender Hub", layout="wide", page_icon="🏛️")
+DB_FILE = "tenders.db"
+LOGO_FILE = "logo.png"
+
+# --- HELPER: CONVERT IMAGE TO BASE64 ---
+def get_img_as_base64(file):
+    try:
+        with open(file, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except:
+        return ""
+
+if os.path.exists(LOGO_FILE):
+    logo_b64 = get_img_as_base64(LOGO_FILE)
+    logo_html = f"data:image/png;base64,{logo_b64}"
+else:
+    logo_html = "" 
+
+# --- HIGH CONTRAST DARK CSS ---
+st.markdown(f"""
+<style>
+    /* 1. HIDE DEFAULTS */
+    #MainMenu {{visibility: hidden;}}
+    footer {{visibility: hidden;}}
+    header {{visibility: hidden;}} 
+    
+    /* 2. STICKY HEADER */
+    .sticky-header {{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        background-color: #0b0f19; /* Matches Dark Theme BG */
+        z-index: 99999;
+        padding: 20px 40px;
+        border-bottom: 1px solid #1e293b;
+        display: flex;
+        align-items: center;
+        transition: all 0.3s ease;
+    }}
+
+    .sticky-header.shrink {{
+        padding: 10px 40px;
+        background-color: rgba(11, 15, 25, 0.95);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }}
+
+    .header-logo {{ height: 80px; margin-right: 20px; transition: all 0.3s; }}
+    .header-title {{ font-size: 30px; font-weight: 800; color: #ffffff !important; margin: 0; transition: all 0.3s; }}
+    
+    .sticky-header.shrink .header-logo {{ height: 40px; }}
+    .sticky-header.shrink .header-title {{ font-size: 20px; }}
+
+    .main .block-container {{ padding-top: 140px !important; }}
+
+    /* 3. CARD CONTAINER - Force Dark Slate */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {{
+        background-color: #111827 !important; 
+        border: 1px solid #374151 !important; 
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }}
+
+    /* 4. TYPOGRAPHY - Force White/Cyan */
+    
+    /* Title */
+    .item-title {{ 
+        font-size: 20px !important; 
+        font-weight: 700 !important; 
+        color: #ffffff !important; /* PURE WHITE */
+        margin-bottom: 5px; 
+        line-height: 1.4;
+    }}
+    
+    /* Subtitle */
+    .dept-subtitle {{ 
+        font-size: 14px !important; 
+        color: #94a3b8 !important; /* LIGHT BLUE-GRAY */
+        font-weight: 500; 
+        margin-bottom: 15px; 
+        padding-bottom: 10px;
+        border-bottom: 1px solid #374151; 
+        display: flex;
+        align-items: center;
+    }}
+
+    /* Badges - Neon Style */
+    .badge {{ 
+        display: inline-block; 
+        padding: 4px 12px; 
+        border-radius: 4px; 
+        font-size: 12px; 
+        font-weight: 700; 
+        margin-right: 10px; 
+        letter-spacing: 0.5px;
+    }}
+    
+    .badge-blue {{ 
+        background-color: rgba(34, 211, 238, 0.1); 
+        color: #22d3ee !important; /* NEON CYAN */
+        border: 1px solid #0891b2; 
+    }} 
+    
+    .badge-purple {{ 
+        background-color: rgba(216, 180, 254, 0.1); 
+        color: #e9d5ff !important; /* LIGHT PURPLE */
+        border: 1px solid #9333ea; 
+    }}
+
+    /* Dates */
+    .date-label {{ 
+        font-size: 11px; 
+        color: #9ca3af !important; 
+        text-transform: uppercase; 
+        font-weight: 700; 
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+    }}
+    .date-value {{ 
+        font-size: 15px; 
+        color: #f3f4f6 !important; /* OFF-WHITE */
+        font-weight: 600; 
+    }}
+
+    /* 5. BUTTONS */
+    /* Primary Action Buttons */
+    div.stButton > button {{
+        width: 100%;
+        border: 1px solid #4b5563 !important;
+        background-color: transparent !important;
+        color: #e5e7eb !important;
+        border-radius: 6px !important;
+        padding: 8px 16px !important;
+    }}
+    
+    div.stButton > button:hover {{
+        border-color: #38bdf8 !important;
+        color: #38bdf8 !important;
+        background-color: rgba(56, 189, 248, 0.1) !important;
+    }}
+
+    /* Link Button (Open PDF) needs specific targeting */
+    a[target="_blank"] {{
+        text-decoration: none;
+    }}
+    /* This targets the internal container of st.link_button if possible, 
+       but Streamlit renders it as an <a> tag styled like a button. 
+       We rely on theme config for this one mostly. */
+
+</style>
+
+<div id="my-header" class="sticky-header">
+    <img src="{logo_html}" class="header-logo">
+    <h1 class="header-title">GeM Tender Hub</h1>
+</div>
+
+<script>
+    function onScroll() {{
+        const header = window.parent.document.getElementById("my-header");
+        const scrollContainer = window.parent.document.querySelector('section.main');
+        if (scrollContainer && header) {{
+            if (scrollContainer.scrollTop > 50) {{
+                header.classList.add("shrink");
+            }} else {{
+                header.classList.remove("shrink");
+            }}
+        }}
+    }}
+    const checkContainer = setInterval(() => {{
+        const scrollContainer = window.parent.document.querySelector('section.main');
+        if (scrollContainer) {{
+            scrollContainer.addEventListener("scroll", onScroll);
+            clearInterval(checkContainer);
+        }}
+    }}, 500);
+</script>
+""", unsafe_allow_html=True)
+
+# --- DATA FUNCTIONS ---
+def get_data(status_filter):
+    conn = sqlite3.connect(DB_FILE)
+    if status_filter == "All":
+        query = "SELECT * FROM tenders ORDER BY found_at DESC"
+    elif status_filter == "Live":
+        query = "SELECT * FROM tenders WHERE status = 'New' ORDER BY found_at DESC"
+    else:
+        query = f"SELECT * FROM tenders WHERE status = '{status_filter}' ORDER BY found_at DESC"
+    try:
+        df = pd.read_sql(query, conn)
+    except Exception:
+        df = pd.DataFrame()
     conn.close()
-    return exists
+    return df
 
-def save_tender_to_db(tender):
-    """Saves a new tender to the SQLite database with all details."""
-    conn = sqlite3.connect("tenders.db")
-    cursor = conn.cursor()
-    try:
-        # Note: We use INSERT OR IGNORE to be safe, though bid_exists() checks first
-        cursor.execute('''
-            INSERT OR IGNORE INTO tenders 
-            (bid_no, title, items, department, start_date, end_date, link, status, found_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            tender['bid_no'], 
-            tender['title'], 
-            tender['items'], 
-            tender['department'], 
-            tender['start_date'],  # New Column
-            tender['end_date'], 
-            tender['link'], 
-            "New", 
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ))
-        conn.commit()
-    except Exception as e:
-        print(f"⚠️ DB Error: {e}")
-    finally:
-        conn.close()
+def update_status(bid_no, new_status):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE tenders SET status = ? WHERE bid_no = ?", (new_status, bid_no))
+    conn.commit()
+    conn.close()
+    st.rerun()
 
-# --- DISCORD ALERT FUNCTION ---
-def send_discord_alert(tender):
-    embed = {
-        "title": f"📢 New Tender: {tender['title']}",
-        "description": f"**Item:** {tender['items']}",
-        "url": tender['link'],
-        "color": 3066993,  # Green Color
-        "fields": [
-            {"name": "🆔 Bid Number", "value": tender['bid_no'], "inline": True},
-            {"name": "🚀 Start Date", "value": tender['start_date'], "inline": True},
-            {"name": "⏳ End Date", "value": tender['end_date'], "inline": True},
-            {"name": "🏢 Department", "value": tender['department'], "inline": False}
-        ],
-        "footer": {"text": f"Found at {datetime.now().strftime('%H:%M')}"}
-    }
-    
-    payload = {"embeds": [embed]}
-    try:
-        requests.post(config.DISCORD_WEBHOOK_URL, json=payload)
-        print(f"✅ Alert sent for {tender['bid_no']}")
-    except Exception as e:
-        print(f"❌ Failed to send Discord alert: {e}")
-
-# --- CORE SCRAPING LOGIC ---
-def scrape_gem():
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting scrape cycle...")
-    new_bids_count = 0
-
-    with sync_playwright() as p:
-        # --- STEALTH LAUNCH (Bypasses Blocking) ---
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled", # Hides "I am a robot" flag
-                "--no-sandbox", 
-                "--disable-setuid-sandbox"
-            ]
-        )
+# --- CARD RENDERER ---
+def render_single_card(row, status_mode):
+    ukey = f"{row['bid_no']}_{status_mode}"
+    with st.container(border=True):
+        # Header Area
+        st.markdown(f"<div class='item-title'>{row['items']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='dept-subtitle'>🏢 {row['department']}</div>", unsafe_allow_html=True)
         
-        # Create a context that mimics a real user
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            ignore_https_errors=True
-        )
+        # Badges (Keyword=Blue, ID=Purple)
+        st.markdown(f"""
+            <span class="badge badge-blue">🎯 {row['title']}</span>
+            <span class="badge badge-purple">🆔 {row['bid_no']}</span>
+        """, unsafe_allow_html=True)
         
-        # Javascript injection to hide WebDriver property
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        st.write("") 
         
-        page = context.new_page()
-
-        try:
-            # --- NAVIGATE TO PUBLIC BID LIST ---
-            target_url = "https://bidplus.gem.gov.in/all-bids"
-            print(f"🌍 Navigating to {target_url}...")
+        # Dates Area
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"""
+                <div class='date-label'>🚀 Start Date</div>
+                <div class='date-value'>{row['start_date']}</div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+                <div class='date-label'>⏳ End Date</div>
+                <div class='date-value'>{row['end_date']}</div>
+            """, unsafe_allow_html=True)
             
-            # High timeout for slow government servers
-            page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
-            
-            # Wait for card container to load
-            page.wait_for_selector(".card-body", timeout=20000)
+        st.divider()
+        
+        # Actions
+        cols = st.columns([1, 1, 1]) 
+        with cols[0]:
+            # Use emoji in label for visual pop
+            st.link_button("📄 Open PDF", row['link'], use_container_width=True)
+        with cols[1]:
+            if status_mode != "Bookmarked":
+                if st.button("📌 Save", key=f"bm_{ukey}", use_container_width=True): 
+                    update_status(row['bid_no'], "Bookmarked")
+            else:
+                if st.button("📤 Unsave", key=f"un_{ukey}", use_container_width=True): 
+                    update_status(row['bid_no'], "New")
+        with cols[2]:
+             if st.button("🗑️ Ignore", key=f"ig_{ukey}", use_container_width=True): 
+                 update_status(row['bid_no'], "Ignored")
 
-            # --- KEYWORD SEARCH LOOP ---
-            for keyword in config.SEARCH_KEYWORDS:
-                print(f"🔍 Searching for: {keyword}")
-                
-                try:
-                    # Select Search Box and Type
-                    search_input = 'input[type="search"]'
-                    page.wait_for_selector(search_input, state="visible", timeout=5000)
-                    
-                    page.fill(search_input, "")
-                    page.fill(search_input, keyword)
-                    page.press(search_input, "Enter")
-                    
-                    # Wait for results to refresh (adjust sleep if connection is slow)
-                    time.sleep(4) 
-                except Exception as e:
-                    print(f"⚠️ Search skipped for '{keyword}': {e}")
-                    continue
+# --- UI LOGIC ---
+tab_live, tab_saved, tab_archive = st.tabs(["📡 Live Feed", "📌 Saved Bids", "🗄️ Archive"])
 
-                # Extract all cards currently visible
-                cards = page.query_selector_all(".card")
-                
-                for card in cards:
-                    try:
-                        full_text = card.inner_text()
-                        
-                        # 1. Extract BID NO
-                        bid_no = "Unknown"
-                        link = target_url
-                        
-                        # Find link (usually contains 'showbidDocument')
-                        link_elem = card.query_selector("a[href*='/showbidDocument']")
-                        if link_elem:
-                            link = "https://bidplus.gem.gov.in" + link_elem.get_attribute("href")
-                            bid_no = link_elem.inner_text().strip()
-                        elif "BID NO:" in full_text:
-                            # Fallback: Parse text if link is hidden
-                            lines = full_text.split('\n')
-                            for line in lines:
-                                if "GEM/" in line:
-                                    bid_no = line.strip()
-                                    break
+with st.expander("🔍 Filter Tenders", expanded=False):
+    search_query = st.text_input("Search", placeholder="Search by Item, Dept, or ID...")
 
-                        # SKIP if already in DB
-                        if bid_exists(bid_no):
-                            continue
-
-                        # 2. Extract Items
-                        items = "N/A"
-                        if "Items:" in full_text:
-                            parts = full_text.split("Items:")
-                            if len(parts) > 1:
-                                items = parts[1].split("Quantity:")[0].strip()
-
-                        # 3. Extract Dates (Start & End)
-                        start_date = "N/A"
-                        end_date = "N/A"
-                        
-                        if "Start Date:" in full_text:
-                            parts = full_text.split("Start Date:")
-                            if len(parts) > 1:
-                                temp = parts[1]
-                                start_date = temp.split("End Date:")[0].strip()
-                                # Clean up formatting
-                                start_date = start_date.replace("\n", "").strip()
-
-                        if "End Date:" in full_text:
-                            parts = full_text.split("End Date:")
-                            if len(parts) > 1:
-                                end_date = parts[1].split("\n")[0].strip()
-
-                        # 4. Extract Department
-                        department = "Unknown"
-                        if "Department Name And Address:" in full_text:
-                            parts = full_text.split("Department Name And Address:")
-                            if len(parts) > 1:
-                                department = parts[1].split("\n")[1].strip()
-
-                        # Construct Data Object
-                        tender_data = {
-                            "bid_no": bid_no,
-                            "title": keyword,  # Using the matched keyword as title tag
-                            "items": items[:150], # Truncate long item lists
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "department": department,
-                            "link": link
-                        }
-
-                        # SAVE & ALERT
-                        save_tender_to_db(tender_data)
-                        send_discord_alert(tender_data)
-                        new_bids_count += 1
-                        
-                    except Exception as e:
-                        # print(f"Card parse error: {e}") # Uncomment for debugging
-                        continue
-                
-                # Polite pause between keywords
-                time.sleep(2)
-
-        except Exception as e:
-            print(f"❌ Error during scraping: {e}")
-
-        finally:
-            browser.close()
-            print(f"✅ Cycle complete. New Bids: {new_bids_count}")
-
-# --- SCHEDULER ---
-if __name__ == "__main__":
-    print("🤖 GeM Scraper Bot Initialized.")
+def render_tab_content(status_mode):
+    df = get_data(status_mode)
+    if search_query:
+        df = df[df['items'].str.contains(search_query, case=False, na=False) | 
+                df['department'].str.contains(search_query, case=False, na=False) | 
+                df['title'].str.contains(search_query, case=False, na=False)]
     
-    # Run once immediately on startup to test
-    scrape_gem()
-    
-    # Schedule runs based on config
-    schedule.every(config.CHECK_INTERVAL).minutes.do(scrape_gem)
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    if df.empty:
+        st.info("No tenders found.")
+        return
+    st.caption(f"Showing {len(df)} tenders")
+    for i in range(0, len(df), 2):
+        cols = st.columns(2)
+        with cols[0]:
+            render_single_card(df.iloc[i], status_mode)
+        if i + 1 < len(df):
+            with cols[1]:
+                render_single_card(df.iloc[i+1], status_mode)
+
+with tab_live: render_tab_content("Live")
+with tab_saved: render_tab_content("Bookmarked")
+with tab_archive: render_tab_content("Ignored")

@@ -2,62 +2,136 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import os
+import base64
 
 # --- CONFIG ---
 st.set_page_config(page_title="GeM Tender Hub", layout="wide", page_icon="🏛️")
 DB_FILE = "tenders.db"
 LOGO_FILE = "logo.png"
 
-# --- CUSTOM CSS (Larger Fonts & Better Spacing) ---
-st.markdown("""
-<style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Card Container */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
-        background-color: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        padding-bottom: 10px;
-    }
-    
-    /* Item Title - Larger */
-    .item-title {
-        font-size: 18px;
-        font-weight: 700;
-        color: #1f1f1f;
-        margin-bottom: 4px;
-        line-height: 1.2;
-    }
-    
-    /* Department Subtitle */
-    .dept-subtitle {
-        font-size: 15px;
-        color: #555;
-        font-weight: 500;
-        margin-bottom: 12px;
-        border-bottom: 1px solid #eee;
-        padding-bottom: 8px;
-    }
+# --- HELPER: CONVERT IMAGE TO BASE64 ---
+def get_img_as_base64(file):
+    try:
+        with open(file, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except:
+        return ""
 
-    /* Badges */
-    .badge {
-        display: inline-block;
-        padding: 5px 10px;
-        border-radius: 6px;
-        font-size: 13px; /* Increased size */
-        font-weight: 600;
-        margin-right: 6px;
-    }
-    .badge-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
-    .badge-gray { background-color: #f5f5f5; color: #424242; border: 1px solid #e0e0e0; }
+if os.path.exists(LOGO_FILE):
+    logo_b64 = get_img_as_base64(LOGO_FILE)
+    logo_html = f"data:image/png;base64,{logo_b64}"
+else:
+    logo_html = "" 
+
+# --- UI REFINEMENTS CSS ---
+st.markdown(f"""
+<style>
+    /* 1. HIDE DEFAULT STREAMLIT UI */
+    header[data-testid="stHeader"], footer, #MainMenu {{
+        display: none !important;
+    }}
     
-    /* Date Box - Larger */
-    .date-label { font-size: 12px; color: #777; text-transform: uppercase; font-weight: 700; }
-    .date-value { font-size: 15px; color: #000; font-weight: 600; margin-top: 2px; }
+    /* 2. BACKGROUND */
+    .stApp {{
+        background-color: #0f172a;
+        color: #f8fafc;
+    }}
     
+    /* 3. STICKY HEADER (Fixed Top) */
+    .sticky-header {{
+        position: fixed; top: 0; left: 0; width: 100%;
+        background-color: #0f172a;
+        z-index: 999999;
+        padding: 15px 40px;
+        border-bottom: 1px solid #1e293b;
+        display: flex; align-items: center; 
+        height: 100px; /* Fixed Height */
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }}
+    .header-logo {{ height: 60px; margin-right: 20px; }}
+    .header-title {{ font-size: 28px; font-weight: 800; color: #fff; margin: 0; }}
+
+    /* 4. PUSH CONTENT DOWN (The "Gap" Fix) */
+    .main .block-container {{ 
+        padding-top: 140px !important; /* Clears the 100px header + 40px gap */
+        max_width: 1200px;
+    }}
+
+    /* 5. CENTRAL SEARCH BAR STYLING */
+    div[data-testid="stTextInput"] {{
+        margin-bottom: 20px;
+    }}
+    div[data-testid="stTextInput"] input {{
+        background-color: #1e293b !important;
+        border: 1px solid #334155 !important;
+        color: white !important;
+        border-radius: 50px !important; /* Rounded pill shape */
+        padding: 10px 20px !important;
+        font-size: 16px;
+    }}
+    div[data-testid="stTextInput"] input:focus {{
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+    }}
+
+    /* 6. CLEAN TABS (No Borders/Boxes) */
+    div[data-baseweb="tab-list"] {{
+        background-color: transparent !important;
+        border: none !important;
+        gap: 40px; /* Space between tab names */
+        justify-content: center; /* Center the tabs */
+        margin-bottom: 30px;
+        border-bottom: 1px solid #334155; /* Subtle line under tabs */
+    }}
+    button[data-baseweb="tab"] {{
+        background-color: transparent !important;
+        border: none !important;
+        color: #94a3b8 !important; 
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        padding-bottom: 10px !important;
+    }}
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        color: #38bdf8 !important; 
+        border-bottom: 3px solid #38bdf8 !important;
+    }}
+    button[data-baseweb="tab"]:focus {{ outline: none !important; }}
+
+    /* 7. CARD STYLING */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {{
+        background-color: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 20px;
+    }}
+    
+    /* 8. TYPOGRAPHY & BADGES */
+    .item-title {{ font-size: 18px; font-weight: 700; color: #f8fafc; margin-bottom: 5px; }}
+    .dept-subtitle {{ font-size: 14px; color: #94a3b8; font-weight: 500; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 10px; }}
+    .badge {{ display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-right: 8px; }}
+    .badge-blue {{ background-color: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid #0ea5e9; }} 
+    .badge-purple {{ background-color: rgba(192, 132, 252, 0.1); color: #e879f9; border: 1px solid #d946ef; }}
+    
+    /* 9. BUTTONS */
+    div.stButton > button {{
+        background-color: transparent !important;
+        color: #cbd5e1 !important;
+        border: 1px solid #475569 !important;
+        border-radius: 8px;
+    }}
+    div.stButton > button:hover {{
+        border-color: #38bdf8 !important;
+        color: #38bdf8 !important;
+        background-color: rgba(56, 189, 248, 0.1) !important;
+    }}
+
 </style>
+
+<div class="sticky-header">
+    <img src="{logo_html}" class="header-logo">
+    <h1 class="header-title">GeM Tender Hub</h1>
+</div>
 """, unsafe_allow_html=True)
 
 # --- DATA FUNCTIONS ---
@@ -69,7 +143,6 @@ def get_data(status_filter):
         query = "SELECT * FROM tenders WHERE status = 'New' ORDER BY found_at DESC"
     else:
         query = f"SELECT * FROM tenders WHERE status = '{status_filter}' ORDER BY found_at DESC"
-    
     try:
         df = pd.read_sql(query, conn)
     except Exception:
@@ -85,41 +158,31 @@ def update_status(bid_no, new_status):
     conn.close()
     st.rerun()
 
-# --- COMPONENT: SINGLE CARD RENDERER ---
+# --- CARD RENDERER ---
 def render_single_card(row, status_mode):
     ukey = f"{row['bid_no']}_{status_mode}"
-    
     with st.container(border=True):
-        # 1. Header Area (Title & Subtitle)
         st.markdown(f"<div class='item-title'>{row['items']}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='dept-subtitle'>🏢 {row['department']}</div>", unsafe_allow_html=True)
         
-        # 2. Badges (Keyword & ID)
         st.markdown(f"""
             <span class="badge badge-blue">🎯 {row['title']}</span>
-            <span class="badge badge-gray">🆔 {row['bid_no']}</span>
+            <span class="badge badge-purple">🆔 {row['bid_no']}</span>
         """, unsafe_allow_html=True)
         
-        st.write("") # Spacer
-
-        # 3. Dates Grid (Larger Text)
+        st.write("") 
+        
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"<div class='date-label'>🚀 Start Date</div><div class='date-value'>{row['start_date']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='color:#94a3b8;font-size:11px;font-weight:700;'>🚀 START</div><div style='color:#f1f5f9;font-weight:600;'>{row['start_date']}</div>", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"<div class='date-label'>⏳ End Date</div><div class='date-value'>{row['end_date']}</div>", unsafe_allow_html=True)
-
+            st.markdown(f"<div style='color:#94a3b8;font-size:11px;font-weight:700;'>⏳ END</div><div style='color:#f1f5f9;font-weight:600;'>{row['end_date']}</div>", unsafe_allow_html=True)
+            
         st.divider()
-
-        # 4. Actions Toolbar (Grouped Tightly)
-        # We use a 4-column layout but give buttons more width (0.3) to fit text
+        
         cols = st.columns([1, 1, 1]) 
-        
-        # Button 1: View Document (Link)
         with cols[0]:
-            st.link_button("📄 Open PDF", row['link'], use_container_width=True)
-        
-        # Button 2: Save / Unsave
+            st.link_button("📄 PDF", row['link'], use_container_width=True)
         with cols[1]:
             if status_mode != "Bookmarked":
                 if st.button("📌 Save", key=f"bm_{ukey}", use_container_width=True): 
@@ -127,58 +190,43 @@ def render_single_card(row, status_mode):
             else:
                 if st.button("📤 Unsave", key=f"un_{ukey}", use_container_width=True): 
                     update_status(row['bid_no'], "New")
-        
-        # Button 3: Ignore
         with cols[2]:
              if st.button("🗑️ Ignore", key=f"ig_{ukey}", use_container_width=True): 
                  update_status(row['bid_no'], "Ignored")
 
-# --- UI HEADER & NAV ---
-c1, c2 = st.columns([1, 8])
-with c1:
-    if os.path.exists(LOGO_FILE):
-        st.image(LOGO_FILE, width=70)
-with c2:
-    st.subheader("GeM Tender Hub")
+# --- UI LOGIC ---
 
+# 1. CENTRAL SEARCH BAR (The "Hero" Section)
+# We use columns to center it nicely
+c1, c2, c3 = st.columns([1, 2, 1])
+with c2:
+    search_query = st.text_input("Search", placeholder="🔍 Search tenders by ID, Item, or Department...", label_visibility="collapsed")
+
+# 2. TABS (Now below search)
 tab_live, tab_saved, tab_archive = st.tabs(["📡 Live Feed", "📌 Saved Bids", "🗄️ Archive"])
 
-# --- SEARCH BAR ---
-with st.expander("🔍 Filter Tenders", expanded=False):
-    search_query = st.text_input("Search", placeholder="Search by Item, Dept, or ID...")
-
-# --- MAIN GRID RENDERER ---
+# 3. GRID CONTENT
 def render_tab_content(status_mode):
     df = get_data(status_mode)
-    
     if search_query:
         df = df[df['items'].str.contains(search_query, case=False, na=False) | 
                 df['department'].str.contains(search_query, case=False, na=False) | 
                 df['title'].str.contains(search_query, case=False, na=False)]
     
     if df.empty:
-        st.info("No tenders found in this section.")
+        st.info("No tenders found.")
         return
     
     st.caption(f"Showing {len(df)} tenders")
-
-    # GRID LOGIC: Process 2 items per row
+    
     for i in range(0, len(df), 2):
         cols = st.columns(2)
-        
-        # Render first card
         with cols[0]:
             render_single_card(df.iloc[i], status_mode)
-        
-        # Render second card (if exists)
         if i + 1 < len(df):
             with cols[1]:
                 render_single_card(df.iloc[i+1], status_mode)
 
-# --- RENDER TABS ---
-with tab_live:
-    render_tab_content("Live")
-with tab_saved:
-    render_tab_content("Bookmarked")
-with tab_archive:
-    render_tab_content("Ignored")
+with tab_live: render_tab_content("Live")
+with tab_saved: render_tab_content("Bookmarked")
+with tab_archive: render_tab_content("Ignored")
