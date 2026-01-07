@@ -27,7 +27,7 @@ else:
 # --- UI REFINEMENTS CSS ---
 st.markdown(f"""
 <style>
-    /* 1. HIDE DEFAULT STREAMLIT UI */
+    /* 1. HIDE DEFAULT UI */
     header[data-testid="stHeader"], footer, #MainMenu {{
         display: none !important;
     }}
@@ -38,59 +38,58 @@ st.markdown(f"""
         color: #f8fafc;
     }}
     
-    /* 3. STICKY HEADER (Fixed Top) */
+    /* 3. STICKY HEADER */
     .sticky-header {{
         position: fixed; top: 0; left: 0; width: 100%;
         background-color: #0f172a;
         z-index: 999999;
-        padding: 15px 40px;
+        padding: 10px 40px; 
         border-bottom: 1px solid #1e293b;
         display: flex; align-items: center; 
-        height: 100px; /* Fixed Height */
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        height: 140px; 
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
     }}
-    .header-logo {{ height: 60px; margin-right: 20px; }}
-    .header-title {{ font-size: 28px; font-weight: 800; color: #fff; margin: 0; }}
+    
+    .header-logo {{ height: 100px; width: auto; margin-right: 30px; }}
+    .header-title {{ font-size: 36px; font-weight: 800; color: #fff; margin: 0; }}
 
-    /* 4. PUSH CONTENT DOWN (The "Gap" Fix) */
-    .main .block-container {{ 
-        padding-top: 140px !important; /* Clears the 100px header + 40px gap */
-        max_width: 1200px;
+    /* 4. SPACER CLASS (The Fix) */
+    .content-spacer {{
+        height: 160px; /* Forces content down */
+        width: 100%;
+        background: transparent;
     }}
 
-    /* 5. CENTRAL SEARCH BAR STYLING */
-    div[data-testid="stTextInput"] {{
-        margin-bottom: 20px;
-    }}
+    /* 5. SEARCH BAR */
     div[data-testid="stTextInput"] input {{
         background-color: #1e293b !important;
         border: 1px solid #334155 !important;
         color: white !important;
-        border-radius: 50px !important; /* Rounded pill shape */
-        padding: 10px 20px !important;
-        font-size: 16px;
+        border-radius: 50px !important;
+        padding: 12px 25px !important;
+        font-size: 18px; 
     }}
     div[data-testid="stTextInput"] input:focus {{
         border-color: #38bdf8 !important;
-        box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+        box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
     }}
 
-    /* 6. CLEAN TABS (No Borders/Boxes) */
+    /* 6. CLEAN TABS */
     div[data-baseweb="tab-list"] {{
         background-color: transparent !important;
         border: none !important;
-        gap: 40px; /* Space between tab names */
-        justify-content: center; /* Center the tabs */
-        margin-bottom: 30px;
-        border-bottom: 1px solid #334155; /* Subtle line under tabs */
+        gap: 50px;
+        justify-content: center;
+        margin-bottom: 40px;
+        border-bottom: 1px solid #334155;
     }}
     button[data-baseweb="tab"] {{
         background-color: transparent !important;
         border: none !important;
         color: #94a3b8 !important; 
-        font-size: 16px !important;
+        font-size: 18px !important; 
         font-weight: 600 !important;
-        padding-bottom: 10px !important;
+        padding-bottom: 12px !important;
     }}
     button[data-baseweb="tab"][aria-selected="true"] {{
         color: #38bdf8 !important; 
@@ -196,16 +195,19 @@ def render_single_card(row, status_mode):
 
 # --- UI LOGIC ---
 
-# 1. CENTRAL SEARCH BAR (The "Hero" Section)
-# We use columns to center it nicely
+# 1. THE BRUTE-FORCE SPACER (The Critical Fix)
+# This invisible box forces the stream down by 160px
+st.markdown('<div class="content-spacer"></div>', unsafe_allow_html=True)
+
+# 2. CENTRAL SEARCH BAR
 c1, c2, c3 = st.columns([1, 2, 1])
 with c2:
     search_query = st.text_input("Search", placeholder="🔍 Search tenders by ID, Item, or Department...", label_visibility="collapsed")
 
-# 2. TABS (Now below search)
+# 3. TABS
 tab_live, tab_saved, tab_archive = st.tabs(["📡 Live Feed", "📌 Saved Bids", "🗄️ Archive"])
 
-# 3. GRID CONTENT
+# 4. GRID CONTENT
 def render_tab_content(status_mode):
     df = get_data(status_mode)
     if search_query:
