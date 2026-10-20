@@ -63,7 +63,7 @@ def send_discord_alert(tender):
     
     payload = {"embeds": [embed]}
     try:
-        requests.post(config.DISCORD_WEBHOOK_URL, json=payload)
+        requests.post(config.DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         print(f"✅ Alert sent for {tender['bid_no']}")
     except Exception as e:
         print(f"❌ Failed to send Discord alert: {e}")
